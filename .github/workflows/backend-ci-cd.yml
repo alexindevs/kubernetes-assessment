@@ -2,10 +2,10 @@ name: Backend CI/CD
 
 on:
   push:
-    branches: [main]
+    branches: [main, master, feature/full-stack]
     paths: ["Server/MuchToDo/**", ".github/workflows/backend-ci-cd.yml", "scripts/deploy-backend.sh", "Server/MuchToDo/Dockerfile"]
   pull_request:
-    branches: [main]
+    branches: [main, master, feature/full-stack]
     paths: ["Server/MuchToDo/**", ".github/workflows/backend-ci-cd.yml", "scripts/deploy-backend.sh"]
 
 env:
@@ -44,7 +44,7 @@ jobs:
     name: Build, Scan & Push Docker Image
     needs: test
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/feature/full-stack')
     outputs:
       ecr_registry: ${{ steps.login-ecr.outputs.registry }}
 
@@ -92,7 +92,7 @@ jobs:
     name: Rolling Deploy to EC2
     needs: build-and-push
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/feature/full-stack')
 
     steps:
       - uses: actions/checkout@v4

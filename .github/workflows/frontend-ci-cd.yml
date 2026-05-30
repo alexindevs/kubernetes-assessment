@@ -2,10 +2,10 @@ name: Frontend CI/CD
 
 on:
   push:
-    branches: [feature/full-stack]
+    branches: [main, master, feature/full-stack]
     paths: ["Client/**", ".github/workflows/frontend-ci-cd.yml", "scripts/deploy-frontend.sh"]
   pull_request:
-    branches: [feature/full-stack]
+    branches: [main, master, feature/full-stack]
     paths: ["Client/**", "scripts/deploy-frontend.sh"]
 
 permissions:
@@ -54,7 +54,7 @@ jobs:
     name: Deploy to S3 + CloudFront
     needs: build-and-test
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/feature/full-stack' && github.event_name == 'push'
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/feature/full-stack')
 
     steps:
       - uses: actions/checkout@v4
