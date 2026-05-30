@@ -116,6 +116,7 @@ jobs:
       - name: Get previous image tag
         id: prev-tag
         run: |
+          git fetch --depth=2
           PREV_SHA=$(git rev-parse HEAD~1)
           echo "sha=$PREV_SHA" >> $GITHUB_OUTPUT
 
