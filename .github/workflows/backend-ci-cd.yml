@@ -130,11 +130,3 @@ jobs:
           done
           echo "Health check failed after 6 attempts" && exit 1
 
-      - name: Ensure CloudWatch alarms exist
-        run: |
-          aws cloudwatch put-metric-alarm \
-            --alarm-name "starttech-high-cpu" \
-            --metric-name CPUUtilization --namespace AWS/EC2 \
-            --statistic Average --period 300 --evaluation-periods 2 \
-            --threshold 70 --comparison-operator GreaterThanThreshold \
-            --dimensions "Name=AutoScalingGroupName,Value=${{ secrets.ASG_NAME }}"
