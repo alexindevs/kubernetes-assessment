@@ -21,6 +21,8 @@ type Config struct {
 	CookieDomains      []string `mapstructure:"COOKIE_DOMAINS"`
 	SecureCookie       bool     `mapstructure:"SECURE_COOKIE"`
 	AllowedOrigins     []string `mapstructure:"ALLOWED_ORIGINS"`
+	Environment        string   `mapstructure:"ENVIRONMENT"`
+	LogFile            string   `mapstructure:"LOG_FILE"`
 }
 
 // LoadConfig reads configuration from file or environment variables.
@@ -38,6 +40,7 @@ func LoadConfig(path string) (config Config, err error) {
 	viper.SetDefault("COOKIE_DOMAINS", []string{"localhost"})
 	viper.SetDefault("SECURE_COOKIE", false)
 	viper.SetDefault("ALLOWED_ORIGINS", []string{"http://localhost:5173"})
+	viper.SetDefault("ENVIRONMENT", "development")
 
 	err = viper.ReadInConfig()
 	if err != nil {
