@@ -113,7 +113,14 @@ jobs:
           ASG_NAME: ${{ secrets.ASG_NAME }}
         run: bash ./scripts/deploy-backend.sh
 
+      - name: Get previous image tag
+        id: prev-tag
+        run: |
+          PREV_SHA=$(git rev-parse HEAD~1)
+          echo "sha=$PREV_SHA" >> $GITHUB_OUTPUT
+
       - name: Smoke test
+        id: smoke
         env:
           AWS_REGION: ${{ env.AWS_REGION }}
         run: |
@@ -129,4 +136,16 @@ jobs:
             sleep 15
           done
           echo "Health check failed after 6 attempts" && exit 1
+
+      - name: Rollback on smoke test failure
+        if: failure() && steps.smoke.outcome == 'failure'
+        env:
+          ECR_REGISTRY: ${{ needs.build-and-push.outputs.ecr_registry }}
+          ECR_REPOSITORY: ${{ env.ECR_REPOSITORY }}
+          IMAGE_TAG: ${{ steps.prev-tag.outputs.sha }}
+          AWS_REGION: ${{ env.AWS_REGION }}
+          ASG_NAME: ${{ secrets.ASG_NAME }}
+        run: |
+          echo "==> Smoke test failed, rolling back to $IMAGE_TAG"
+          bash ./scripts/deploy-backend.sh
 
