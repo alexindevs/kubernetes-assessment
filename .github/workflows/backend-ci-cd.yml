@@ -1,0 +1,153 @@
+name: Backend CI/CD
+
+on:
+  push:
+    branches: [main, master, feature/full-stack]
+    paths: ["Server/MuchToDo/**", ".github/workflows/backend-ci-cd.yml", "scripts/deploy-backend.sh", "Server/MuchToDo/Dockerfile"]
+  pull_request:
+    branches: [main, master, feature/full-stack]
+    paths: ["Server/MuchToDo/**", ".github/workflows/backend-ci-cd.yml", "scripts/deploy-backend.sh"]
+
+env:
+  AWS_REGION: "us-east-1"
+  ECR_REPOSITORY: "starttech-backend"
+  GO_VERSION: "1.25"
+
+jobs:
+  test:
+    name: Test & Vulnerability Scan
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./Server/MuchToDo
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Run tests
+        run: go test ./... -v -cover
+
+      - name: Go vet
+        run: go vet ./...
+
+      - name: Vulnerability scan
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./... || true
+
+  build-and-push:
+    name: Build, Scan & Push Docker Image
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/feature/full-stack')
+    outputs:
+      ecr_registry: ${{ steps.login-ecr.outputs.registry }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build image locally
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build \
+            -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
+            -t $ECR_REGISTRY/$ECR_REPOSITORY:latest \
+            ./Server/MuchToDo
+
+      - name: Scan image for vulnerabilities
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: "${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}"
+          format: table
+          exit-code: "1"
+          severity: HIGH,CRITICAL
+
+      - name: Push image to ECR
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+
+  deploy:
+    name: Rolling Deploy to EC2
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/feature/full-stack')
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy backend via script
+        env:
+          ECR_REGISTRY: ${{ needs.build-and-push.outputs.ecr_registry }}
+          ECR_REPOSITORY: ${{ env.ECR_REPOSITORY }}
+          IMAGE_TAG: ${{ github.sha }}
+          AWS_REGION: ${{ env.AWS_REGION }}
+          ASG_NAME: ${{ secrets.ASG_NAME }}
+        run: bash ./scripts/deploy-backend.sh
+
+      - name: Get previous image tag
+        id: prev-tag
+        run: |
+          PREV_SHA=$(git rev-parse HEAD~1)
+          echo "sha=$PREV_SHA" >> $GITHUB_OUTPUT
+
+      - name: Smoke test
+        id: smoke
+        env:
+          AWS_REGION: ${{ env.AWS_REGION }}
+        run: |
+          sleep 30
+          ALB_DNS=$(aws elbv2 describe-load-balancers \
+            --names "${{ secrets.ALB_NAME }}" \
+            --query "LoadBalancers[0].DNSName" --output text)
+          for i in $(seq 1 6); do
+            STATUS=$(curl -sf -o /dev/null -w "%{http_code}" \
+              --max-time 10 "http://$ALB_DNS/health" || echo 000)
+            [ "$STATUS" = "200" ] && echo "Health check passed" && exit 0
+            echo "Attempt $i: HTTP $STATUS, retrying in 15s..."
+            sleep 15
+          done
+          echo "Health check failed after 6 attempts" && exit 1
+
+      - name: Rollback on smoke test failure
+        if: failure() && steps.smoke.outcome == 'failure'
+        env:
+          ECR_REGISTRY: ${{ needs.build-and-push.outputs.ecr_registry }}
+          ECR_REPOSITORY: ${{ env.ECR_REPOSITORY }}
+          IMAGE_TAG: ${{ steps.prev-tag.outputs.sha }}
+          AWS_REGION: ${{ env.AWS_REGION }}
+          ASG_NAME: ${{ secrets.ASG_NAME }}
+        run: |
+          echo "==> Smoke test failed, rolling back to $IMAGE_TAG"
+          bash ./scripts/deploy-backend.sh
+
