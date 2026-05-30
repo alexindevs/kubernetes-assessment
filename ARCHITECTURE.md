@@ -66,7 +66,7 @@ Multi-stage Docker build:
 1. **Builder** — `golang:1.25-alpine`. Compiles a statically linked binary (`CGO_ENABLED=0`) with debug info stripped.
 2. **Runtime** — `gcr.io/distroless/static-debian12`. No shell, no package manager. Runs as `nonroot` (uid 65532).
 
-The result is a ~20MB image with a minimal CVE surface.
+The result is a small image with a minimal CVE surface.
 
 ## Data Layer
 
