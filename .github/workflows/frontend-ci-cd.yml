@@ -8,6 +8,9 @@ on:
     branches: [feature/full-stack]
     paths: ["Client/**", "scripts/deploy-frontend.sh"]
 
+permissions:
+  statuses: write
+
 env:
   AWS_REGION: "us-east-1"
 
